@@ -1,49 +1,50 @@
-/* number of bytes following the first byte in a UTF-8 char */
-#define UTF8Extra(h) ( \
-	((h) & 0x80) == 0x00? 0 : \
-	((h) & 0xe0) == 0xc0? 1 : \
-	((h) & 0xf0) == 0xe0? 2 : \
-	((h) & 0xf8) == 0xf0? 3 : \
-	((h) & 0xfc) == 0xf8? 4 : \
-	((h) & 0xfe) == 0xfc? 5 : -1)
+#include "utf8.h"
 
-/* number of bytes needed to encode given unicode in UTF-8 */
-#define UTF8Bytes(r) ( \
-	(r) <= 0x7f?       1 : \
-	(r) <= 0x7ff?      2 : \
-	(r) <= 0xffff?     3 : \
-	(r) <= 0x1fffff?   4 : \
-	(r) <= 0x3ffffff?  5 : \
-	(r) <= 0x7fffffff? 6 : -1)
+/* number of bytes in UTF-8 code started by given byte */
+#define UTF8Size(b) ( \
+	((b) & 0x80) == 0x00? 1 : \
+	((b) & 0xe0) == 0xc0? 2 : \
+	((b) & 0xf0) == 0xe0? 3 : \
+	((b) & 0xf8) == 0xf0? 4 : -1)
 
-/* decodes the first UTF-8 char in the string */
-int utf8_to_int(const char *s)
+/* number of bytes needed in UTF-8 to encode given rune */
+#define RuneSize(r) ( \
+	(r) < 0x80?     1 : \
+	(r) < 0x800?    2 : \
+	(r) < 0x10000?  3 : \
+	(r) < 0x110000? 4 : -1)
+
+/* decode the first rune in UTF-8 string */
+Rune utf8_decode(const char *s)
 {
-	int n = UTF8Extra(*s);
-	int rune;
+	int i, n = UTF8Size(*s);
+	Rune rune;
 
 	/* read value from the header */
-	if (n == 0)
+	if (n == 1)
 		rune = *s & 0x7f;
-	else if (n > 0)
-		rune = *s & (0x1f >> n);
+	else if (n > 1)
+		rune = *s & (0x3f >> n);
 	else
 		return -1;
 
 	/* read values from the extra bytes */
-	while (n-- > 0) {
+	for (i = 1; i < n; i++) {
 		if ((*++s & 0xc0) != 0x80)
 			return -1;
 		rune = (rune << 6) | (*s & 0x3f);
 	}
 
+	/* check if not overlong */
+	if (RuneSize(rune) < UTF8Size(*s))
+		rune = 0xfffd; /* decode as malformed */
 	return rune;
 }
 
-/* encodes unicode char as a UTF-8 string */
-char *utf8_from_int(char *s, int rune)
+/* encode rune as UTF-8 string */
+char *utf8_encode(char *s, Rune rune)
 {
-	int n = UTF8Bytes(rune);
+	int n = RuneSize(rune);
 	int i;
 
 	if (n <= 0) {
@@ -62,33 +63,41 @@ char *utf8_from_int(char *s, int rune)
 	}
 
 	s[n] = '\0';
-
 	return s;
 }
 
-/* decodes a UTF-8 string into an array of unicode ids */
-void utf8_decode(int *runes, char *s)
+/* find next rune in UTF-8 string, never jump over NUL */
+char *utf8_next(char *s)
 {
-	int i, j;
+	char *t = s+UTF8Size(*s);
 
-	for (i = j = 0; s[i]; i += 1+UTF8Extra(s[i]), j++)
-		runes[j] = utf8_to_int(s+i);
-	runes[j] = 0;
+	while (*s && s < t)
+		s++;
+	return s;
 }
 
-/* compares two UTF-8 strings */
-int utf8_cmp(char *a, char *b)
+/* find length of UTF-8 string */
+int utf8_len(char *s)
 {
-	int ra = 0, rb = 0;
+	int i = 0;
 
-	while (*a && *b) {
-		ra = utf8_to_int(a);
-		rb = utf8_to_int(b);
-		if (ra != rb)
-			return ra - rb;
-		a += 1+UTF8Extra(*a);
-		b += 1+UTF8Extra(*b);
+	for (; *s; s = utf8_next(s))
+		i++;
+	return i;
+}
+
+/* compare UTF-8 strings */
+int utf8_cmp(char *s, char *t)
+{
+	Rune rs = 0, rt = 0;
+
+	while (*s && *t) {
+		rs = utf8_decode(s);
+		rt = utf8_decode(t);
+		if (rs != rt)
+			break;
+		s = utf8_next(s);
+		t = utf8_next(t);
 	}
-
-	return *(unsigned char*)a - *(unsigned char*)b;
+	return rs - rt;
 }
