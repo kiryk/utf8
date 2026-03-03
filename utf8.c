@@ -1,19 +1,5 @@
 #include "utf8.h"
 
-/* number of bytes in UTF-8 code started by given byte */
-#define UTF8Size(b) ( \
-	((b) & 0x80) == 0x00? 1 : \
-	((b) & 0xe0) == 0xc0? 2 : \
-	((b) & 0xf0) == 0xe0? 3 : \
-	((b) & 0xf8) == 0xf0? 4 : -1)
-
-/* number of bytes needed in UTF-8 to encode given rune */
-#define RuneSize(r) ( \
-	(r) < 0x80?     1 : \
-	(r) < 0x800?    2 : \
-	(r) < 0x10000?  3 : \
-	(r) < 0x110000? 4 : -1)
-
 /* decode the first rune in UTF-8 string */
 Rune utf8_decode(const char *s)
 {
@@ -26,12 +12,12 @@ Rune utf8_decode(const char *s)
 	else if (n > 1)
 		rune = *s & (0x3f >> n);
 	else
-		return -1;
+		return 0xfffd;
 
 	/* read values from the extra bytes */
 	for (i = 1; i < n; i++) {
 		if ((*++s & 0xc0) != 0x80)
-			return -1;
+			return 0xfffd;
 		rune = (rune << 6) | (*s & 0x3f);
 	}
 
